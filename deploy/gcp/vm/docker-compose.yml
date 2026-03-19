@@ -49,5 +49,23 @@ services:
         max-size: 10m
         max-file: '3'
 
+  migrate:
+    image: ${MIGRATE_IMAGE}
+    profiles:
+      - ops
+    restart: 'no'
+    init: true
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ['pnpm', 'db:migrate']
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
 volumes:
   postgres-data:

@@ -555,16 +555,6 @@ bootstrap_vm_runtime() {
   fail "VM runtime bootstrap failed on ${GCP_VM_NAME}"
 }
 
-render_migrate_env_file() {
-  local destination="$1"
-
-  cat >"${destination}" <<EOF
-NODE_ENV: production
-DATABASE_URL: ${DATABASE_URL}
-PG_BOSS_SCHEMA: ${APP_PG_BOSS_SCHEMA}
-EOF
-}
-
 render_api_env_file() {
   local destination="$1"
   local origin="$2"
@@ -708,6 +698,7 @@ PG_BOSS_SCHEMA=${APP_PG_BOSS_SCHEMA}
 PLAYWRIGHT_HEADLESS=true
 PLAYWRIGHT_TIMEOUT_MS=60000
 WORKER_IMAGE=${IMAGE_WORKER}
+MIGRATE_IMAGE=${IMAGE_MIGRATE}
 POSTGRES_SHARED_BUFFERS=128MB
 POSTGRES_MAX_CONNECTIONS=50
 POSTGRES_WORK_MEM=4MB
@@ -780,6 +771,19 @@ start_vm_postgres() {
         sleep 5
       done
       exit 1
+    " >/dev/null
+}
+
+run_vm_migrations() {
+  log 'Running database migrations on the VM'
+  run_vm_ssh "${GCP_VM_NAME}" \
+    --zone "${GCP_ZONE}" \
+    --tunnel-through-iap \
+    --ssh-key-expire-after=10m \
+    --command "
+      set -euo pipefail
+      cd /opt/playwatch/runtime
+      sudo docker compose --profile ops run --rm migrate
     " >/dev/null
 }
 
@@ -881,13 +885,8 @@ trap 'rm -rf "${TEMP_DIR}"' EXIT
 sync_vm_runtime_bundle 'https://placeholder.invalid'
 start_vm_postgres
 
-render_migrate_env_file "${TEMP_DIR}/migrate.env.yaml"
-log 'Configuring migration job'
-ensure_migration_job "${TEMP_DIR}/migrate.env.yaml"
-
 if [[ "${RUN_MIGRATIONS}" == 'true' ]]; then
-  log 'Executing migration job'
-  gcloud run jobs execute "${GCP_MIGRATE_JOB_NAME}" --region "${GCP_REGION}" --wait >/dev/null
+  run_vm_migrations
 fi
 
 log 'Deploying Cloud Run API service'
