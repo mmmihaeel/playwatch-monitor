@@ -431,13 +431,66 @@ wait_for_ssh() {
   fail "Compute Engine VM ${GCP_VM_NAME} did not become reachable over SSH"
 }
 
+wait_for_startup_scripts() {
+  local startup_state
+
+  log "Waiting for startup scripts on ${GCP_VM_NAME}"
+
+  for _attempt in {1..60}; do
+    startup_state="$(
+      gcloud compute ssh "${GCP_VM_NAME}" \
+        --zone "${GCP_ZONE}" \
+        --tunnel-through-iap \
+        --ssh-key-expire-after=10m \
+        --command "systemctl show -p ActiveState --value google-startup-scripts.service 2>/dev/null || echo unknown" \
+        2>/dev/null | tr -d '\r' || true
+    )"
+
+    case "${startup_state}" in
+      active | activating | deactivating | reloading)
+        sleep 5
+        ;;
+      failed)
+        gcloud compute ssh "${GCP_VM_NAME}" \
+          --zone "${GCP_ZONE}" \
+          --tunnel-through-iap \
+          --ssh-key-expire-after=10m \
+          --command 'sudo journalctl -u google-startup-scripts.service -n 200 --no-pager' >&2 || true
+        fail "Startup scripts failed on ${GCP_VM_NAME}"
+        ;;
+      inactive)
+        return 0
+        ;;
+      *)
+        sleep 5
+        ;;
+    esac
+  done
+
+  fail "Startup scripts on ${GCP_VM_NAME} did not finish in time"
+}
+
 bootstrap_vm_runtime() {
-  log "Bootstrapping VM runtime on ${GCP_VM_NAME}"
-  gcloud compute ssh "${GCP_VM_NAME}" \
-    --zone "${GCP_ZONE}" \
-    --tunnel-through-iap \
-    --ssh-key-expire-after=10m \
-    --command "sudo bash -s -- '${GCP_REGION}'" < deploy/gcp/vm/bootstrap.sh >/dev/null
+  local attempt
+
+  for attempt in {1..3}; do
+    log "Bootstrapping VM runtime on ${GCP_VM_NAME} (attempt ${attempt}/3)"
+    if gcloud compute ssh "${GCP_VM_NAME}" \
+      --zone "${GCP_ZONE}" \
+      --tunnel-through-iap \
+      --ssh-key-expire-after=10m \
+      --command "sudo bash -s -- '${GCP_REGION}'" < deploy/gcp/vm/bootstrap.sh >/dev/null; then
+      return 0
+    fi
+
+    if (( attempt == 3 )); then
+      break
+    fi
+
+    sleep 15
+  done
+
+  fail "VM runtime bootstrap failed on ${GCP_VM_NAME}"
 }
 
 render_migrate_env_file() {
@@ -755,6 +808,7 @@ fi
 
 ensure_vm
 wait_for_ssh
+wait_for_startup_scripts
 bootstrap_vm_runtime
 
 VM_INTERNAL_IP="$(gcloud compute instances describe "${GCP_VM_NAME}" --zone "${GCP_ZONE}" --format='value(networkInterfaces[0].networkIP)')"

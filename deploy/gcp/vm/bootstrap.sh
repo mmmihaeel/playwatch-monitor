@@ -52,7 +52,7 @@ run_apt_get() {
 
   for attempt in {1..5}; do
     wait_for_apt_locks
-    if apt-get "$@"; then
+    if apt-get -o DPkg::Lock::Timeout=300 "$@"; then
       return 0
     fi
 
