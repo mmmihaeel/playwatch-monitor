@@ -165,6 +165,7 @@ ensure_gcp_services() {
   log 'Enabling required Google Cloud APIs'
   gcloud services enable \
     artifactregistry.googleapis.com \
+    cloudresourcemanager.googleapis.com \
     compute.googleapis.com \
     iap.googleapis.com \
     iam.googleapis.com \

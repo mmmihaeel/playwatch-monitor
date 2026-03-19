@@ -123,7 +123,15 @@ jobs:
 
           repo="${GCP_ARTIFACT_REGISTRY_REPOSITORY:-playwatch}"
 
-          gcloud services enable artifactregistry.googleapis.com
+          gcloud services enable \
+            artifactregistry.googleapis.com \
+            cloudresourcemanager.googleapis.com \
+            compute.googleapis.com \
+            iap.googleapis.com \
+            iam.googleapis.com \
+            iamcredentials.googleapis.com \
+            run.googleapis.com \
+            storage.googleapis.com
 
           gcloud artifacts repositories describe "${repo}" \
             --location "${GCP_REGION}" >/dev/null 2>&1 || \
