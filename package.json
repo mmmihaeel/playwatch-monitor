@@ -21,7 +21,7 @@
     "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts",
     "db:migrate": "tsx --tsconfig packages/db/tsconfig.typecheck.json packages/db/scripts/migrate.ts",
     "db:seed": "tsx --tsconfig packages/db/tsconfig.typecheck.json packages/db/scripts/seed.ts",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm build && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@eslint/js": "^9.23.0",
