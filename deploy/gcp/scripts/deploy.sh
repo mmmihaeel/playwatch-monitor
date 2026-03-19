@@ -145,6 +145,20 @@ service_account_id_from_email() {
   printf '%s' "${1%@*}"
 }
 
+wait_for_service_account() {
+  local email="$1"
+
+  for _attempt in {1..12}; do
+    if resource_exists gcloud iam service-accounts describe "${email}"; then
+      return 0
+    fi
+
+    sleep 5
+  done
+
+  fail "Service account ${email} did not become readable after creation"
+}
+
 ensure_service_account() {
   local email="$1"
   local display_name="$2"
@@ -159,6 +173,8 @@ ensure_service_account() {
   gcloud iam service-accounts create "${account_id}" \
     --display-name "${display_name}" \
     --quiet >/dev/null
+
+  wait_for_service_account "${email}"
 }
 
 ensure_gcp_services() {
