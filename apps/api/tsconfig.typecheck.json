@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "paths": {
+      "@playwatch/config": ["packages/config/src/index.ts"],
+      "@playwatch/db": ["packages/db/src/index.ts"],
+      "@playwatch/storage": ["packages/storage/src/index.ts"],
+      "@playwatch/shared": ["packages/shared/src/index.ts"]
+    }
+  }
+}

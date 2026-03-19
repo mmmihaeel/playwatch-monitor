@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+dist
+coverage
+.git
+.env
+.env.*
+docs
+playwright-report
+test-results
+tmp_pdf_excerpt.txt
+tmp
+data/screenshots/*
+!data/screenshots/.gitkeep

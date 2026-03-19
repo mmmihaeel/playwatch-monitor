@@ -1,0 +1,32 @@
+{
+  "name": "@playwatch/web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 3000",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview --port 3000",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.1.1",
+    "@fontsource/manrope": "^5.1.1",
+    "@hookform/resolvers": "^5.0.1",
+    "@playwatch/shared": "workspace:*",
+    "@tanstack/react-query": "^5.90.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-hook-form": "^7.56.4",
+    "react-router-dom": "^7.6.3",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "tailwindcss": "^4.2.2",
+    "vite": "^8.0.0"
+  }
+}

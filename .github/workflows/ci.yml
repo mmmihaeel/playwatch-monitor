@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: playwatch-ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deployment scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n deploy/gcp/scripts/deploy.sh
+          bash -n deploy/gcp/vm/bootstrap.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod
+      - run: pnpm check
+      - name: Build Docker stack
+        run: docker compose up --build -d
+      - name: Wait for proxied health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:3000/api/health | tee /tmp/health.json | grep -q '"status":"ok"'; then
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Docker stack did not become healthy within 5 minutes." >&2
+          exit 1
+      - name: Smoke test web shell and proxied API
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fsS http://127.0.0.1:3000/ > /tmp/index.html
+          grep -qi '<!doctype html>' /tmp/index.html
+
+          headers="$(curl -fsSI http://127.0.0.1:3000/)"
+          echo "$headers" | grep -qi 'content-security-policy'
+
+          curl -fsS \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{"sourceUrl":"https://play.google.com/store/apps/details?id=com.spotify.music","region":"US","locale":"en-US","captureFrequencyMinutes":60}' \
+            http://127.0.0.1:3000/api/monitored-apps > /tmp/created-app.json
+
+          grep -q '"packageId":"com.spotify.music"' /tmp/created-app.json
+          curl -fsS http://127.0.0.1:3000/api/monitored-apps | grep -q 'com.spotify.music'
+      - name: Print Docker logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Tear down Docker stack
+        if: always()
+        run: docker compose down -v --remove-orphans

@@ -1,0 +1,20 @@
+{
+  "name": "@playwatch/worker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --tsconfig tsconfig.typecheck.json src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit"
+  },
+  "dependencies": {
+    "@playwatch/config": "workspace:*",
+    "@playwatch/db": "workspace:*",
+    "@playwatch/storage": "workspace:*",
+    "@playwatch/shared": "workspace:*",
+    "pg-boss": "^12.0.0",
+    "playwright": "^1.52.0"
+  }
+}
