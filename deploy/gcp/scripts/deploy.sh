@@ -563,7 +563,6 @@ render_api_env_file() {
 NODE_ENV: production
 DATABASE_URL: ${DATABASE_URL}
 API_HOST: 0.0.0.0
-PORT: "4000"
 API_TRUST_PROXY: "true"
 WEB_PORT: "3000"
 WEB_ORIGIN: ${origin}
