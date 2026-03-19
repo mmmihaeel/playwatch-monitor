@@ -38,7 +38,7 @@ const envSchema = z.object({
   GCS_BUCKET_NAME: z.string().trim().min(1).optional(),
   GOOGLE_PLAY_DEFAULT_REGION: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).default('US'),
   GOOGLE_PLAY_DEFAULT_LOCALE: z.string().trim().regex(/^[a-z]{2}(?:-[A-Z]{2})?$/).default('en-US'),
-  PG_BOSS_SCHEMA: z.string().min(1).default('pgboss'),
+  PG_BOSS_SCHEMA: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'PG_BOSS_SCHEMA must be a valid PostgreSQL identifier.').default('pgboss'),
   PLAYWRIGHT_HEADLESS: booleanishSchema.default(true),
   PLAYWRIGHT_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000)
 }).superRefine((value, context) => {

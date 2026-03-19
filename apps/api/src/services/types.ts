@@ -11,6 +11,7 @@ export type MonitoredAppsService = {
   getById: (id: string) => Promise<MonitoredAppDto>;
   create: (input: MonitoredAppCreateInput) => Promise<MonitoredAppDto>;
   update: (id: string, input: MonitoredAppUpdateInput) => Promise<MonitoredAppDto>;
+  delete: (id: string) => Promise<void>;
 };
 
 export type SnapshotsService = {

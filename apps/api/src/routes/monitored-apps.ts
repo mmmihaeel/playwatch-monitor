@@ -33,4 +33,10 @@ export function registerMonitoredAppRoutes(app: FastifyInstance) {
       data: await app.services.monitoredApps.update(params.id, body)
     };
   });
+
+  app.delete('/monitored-apps/:id', async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    await app.services.monitoredApps.delete(params.id);
+    return reply.code(204).send();
+  });
 }

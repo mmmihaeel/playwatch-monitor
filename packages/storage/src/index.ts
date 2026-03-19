@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 
 import { Storage as GoogleCloudStorage } from '@google-cloud/storage';
@@ -17,6 +17,7 @@ export type StorageAdapterConfig = {
 export type StorageAdapter = {
   save: (objectKey: string, buffer: Buffer, options?: { contentType?: string }) => Promise<void>;
   read: (objectKey: string) => Promise<StorageObject | null>;
+  remove: (objectKey: string) => Promise<void>;
 };
 
 function normalizeObjectKey(objectKey: string) {
@@ -74,6 +75,18 @@ export function createLocalStorageAdapter(rootDirectory: string): StorageAdapter
 
         throw error;
       }
+    },
+    async remove(objectKey) {
+      try {
+        const filePath = resolveSafeFilePath(rootDirectory, objectKey);
+        await unlink(filePath);
+      } catch (error) {
+        if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'ENOENT') {
+          return;
+        }
+
+        throw error;
+      }
     }
   };
 }
@@ -111,6 +124,14 @@ export function createGcsStorageAdapter(bucketName: string): StorageAdapter {
 
         throw error;
       }
+    },
+    async remove(objectKey) {
+      const safeObjectKey = normalizeObjectKey(objectKey);
+      const file = bucket.file(safeObjectKey);
+
+      await file.delete({
+        ignoreNotFound: true
+      });
     }
   };
 }

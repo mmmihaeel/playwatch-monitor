@@ -16,7 +16,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
-    "test": "vitest run --coverage",
+    "test": "node -e \"require('node:fs').mkdirSync('coverage/.tmp', { recursive: true })\" && vitest run --coverage",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts",
     "db:migrate": "tsx --tsconfig packages/db/tsconfig.typecheck.json packages/db/scripts/migrate.ts",

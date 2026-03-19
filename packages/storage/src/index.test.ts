@@ -35,6 +35,19 @@ describe('createLocalStorageAdapter', () => {
     await expect(storage.read('com.example.app/missing.png')).resolves.toBeNull();
   });
 
+  it('removes screenshot payloads without failing on missing objects', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'playwatch-storage-'));
+    createdDirectories.push(directory);
+    const storage = createLocalStorageAdapter(directory);
+    const objectKey = 'com.example.app/2026-03-19T07-00-00-000Z.png';
+
+    await storage.save(objectKey, Buffer.from('image-data'));
+    await storage.remove(objectKey);
+    await storage.remove(objectKey);
+
+    await expect(storage.read(objectKey)).resolves.toBeNull();
+  });
+
   it('rejects traversal attempts', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'playwatch-storage-'));
     createdDirectories.push(directory);

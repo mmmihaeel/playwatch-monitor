@@ -43,7 +43,7 @@ export async function buildApp(options: {
   });
 
   await app.register(cors, {
-    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     origin: (origin, callback) => {
       if (!origin || options.config.CORS_ORIGINS.includes(origin)) {
         callback(null, true);

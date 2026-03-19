@@ -49,3 +49,46 @@ describe('buildDashboardSummary', () => {
     });
   });
 });
+
+describe('deleteMonitoredApp', () => {
+  it('does not send a JSON content-type header for bodyless delete requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: vi.fn().mockRejectedValue(new Error('no content'))
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { deleteMonitoredApp } = await import('./api.js');
+    await expect(deleteMonitoredApp('550e8400-e29b-41d4-a716-446655440000')).resolves.toBeUndefined();
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = new Headers(init.headers);
+
+    expect(init.method).toBe('DELETE');
+    expect(headers.has('Content-Type')).toBe(false);
+  });
+});
+
+describe('deleteMonitoredApp', () => {
+  it('treats a 204 response as a successful deletion', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: vi.fn().mockRejectedValue(new Error('no content'))
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { deleteMonitoredApp } = await import('./api.js');
+
+    await expect(deleteMonitoredApp('550e8400-e29b-41d4-a716-446655440000')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:4000/api/monitored-apps/550e8400-e29b-41d4-a716-446655440000',
+      expect.objectContaining({
+        method: 'DELETE'
+      })
+    );
+  });
+});

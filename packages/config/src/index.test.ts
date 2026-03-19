@@ -43,4 +43,13 @@ describe('readConfig', () => {
       })
     ).toThrow('GCS_BUCKET_NAME is required when SCREENSHOT_STORAGE_DRIVER is set to gcs.');
   });
+
+  it('rejects unsafe pg-boss schema names', () => {
+    expect(() =>
+      readConfig({
+        ...baseEnv,
+        PG_BOSS_SCHEMA: 'pgboss;drop schema public;'
+      })
+    ).toThrow('PG_BOSS_SCHEMA must be a valid PostgreSQL identifier.');
+  });
 });

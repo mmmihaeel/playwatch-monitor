@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import type { Ref } from 'react';
+import { useId, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -36,18 +37,25 @@ export function MonitoredAppForm(props: {
   helperText?: string;
   defaultValues: MonitoredAppFormValues;
   showStatusField?: boolean;
+  className?: string;
+  sourceUrlInputRef?: Ref<HTMLInputElement>;
   onSubmit: (values: MonitoredAppFormValues) => Promise<void>;
 }) {
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const sectionTitleId = useId();
   const form = useForm<MonitoredAppFormValues>({
     resolver: zodResolver(monitoredAppFormSchema),
     defaultValues: props.defaultValues
   });
   const isSubmitting = form.formState.isSubmitting;
   const isActive = form.watch('isActive');
+  const sourceUrlRegistration = form.register('sourceUrl');
 
   return (
-    <section className="surface-panel rounded-[30px] px-6 py-6 sm:px-7">
+    <section
+      aria-labelledby={sectionTitleId}
+      className={['surface-panel rounded-[30px] px-6 py-6 sm:px-7', props.className ?? ''].join(' ').trim()}
+    >
       <form
         className="flex flex-col gap-6"
         onSubmit={form.handleSubmit(async (values) => {
@@ -59,9 +67,9 @@ export function MonitoredAppForm(props: {
             setSubmissionError(error instanceof Error ? error.message : 'Unexpected form error.');
           }
         })}
-      >
+        >
         <header className="space-y-2">
-          <p className="section-title">{props.title}</p>
+          <p id={sectionTitleId} className="section-title">{props.title}</p>
           <p className="muted-copy max-w-2xl">{props.description}</p>
         </header>
 
@@ -74,7 +82,21 @@ export function MonitoredAppForm(props: {
               id={`${props.title}-source-url`}
               className="input-control"
               placeholder="https://play.google.com/store/apps/details?id=com.example.app"
-              {...form.register('sourceUrl')}
+              {...sourceUrlRegistration}
+              ref={(element) => {
+                sourceUrlRegistration.ref(element);
+
+                if (!props.sourceUrlInputRef) {
+                  return;
+                }
+
+                if (typeof props.sourceUrlInputRef === 'function') {
+                  props.sourceUrlInputRef(element);
+                  return;
+                }
+
+                props.sourceUrlInputRef.current = element;
+              }}
             />
             {form.formState.errors.sourceUrl ? (
               <p className="field-error">{form.formState.errors.sourceUrl.message}</p>

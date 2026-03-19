@@ -45,7 +45,8 @@ function createServicesFixture(): ApiServices {
       list: vi.fn().mockResolvedValue([]),
       getById: vi.fn(),
       create: vi.fn(),
-      update: vi.fn()
+      update: vi.fn(),
+      delete: vi.fn()
     },
     snapshots: {
       listByMonitoredAppId: vi.fn().mockResolvedValue([])
@@ -129,6 +130,29 @@ describe('buildApp', () => {
     await rm(config.SCREENSHOT_STORAGE_DIR, { recursive: true, force: true });
   });
 
+  it('deletes monitored apps through the API routes', async () => {
+    const config = await createConfigFixture();
+    const services = createServicesFixture();
+    services.monitoredApps.delete = vi.fn().mockResolvedValue(undefined);
+
+    const app = await buildApp({
+      config,
+      services,
+      storage: createStorageAdapter(config)
+    });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/monitored-apps/550e8400-e29b-41d4-a716-446655440000'
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(services.monitoredApps.delete).toHaveBeenCalledWith('550e8400-e29b-41d4-a716-446655440000');
+
+    await app.close();
+    await rm(config.SCREENSHOT_STORAGE_DIR, { recursive: true, force: true });
+  });
+
   it('allows configured loopback origins for browser clients', async () => {
     const config = await createConfigFixture();
     const app = await buildApp({
@@ -174,7 +198,7 @@ describe('buildApp', () => {
     await rm(config.SCREENSHOT_STORAGE_DIR, { recursive: true, force: true });
   });
 
-  it('allows PATCH preflight requests from configured browser origins', async () => {
+  it('allows PATCH and DELETE preflight requests from configured browser origins', async () => {
     const config = await createConfigFixture();
     const app = await buildApp({
       config,
@@ -187,13 +211,14 @@ describe('buildApp', () => {
       url: '/api/monitored-apps/550e8400-e29b-41d4-a716-446655440000',
       headers: {
         origin: 'http://localhost:3000',
-        'access-control-request-method': 'PATCH'
+        'access-control-request-method': 'DELETE'
       }
     });
 
     expect(response.statusCode).toBe(204);
     expect(response.headers['access-control-allow-origin']).toBe('http://localhost:3000');
     expect(response.headers['access-control-allow-methods']).toContain('PATCH');
+    expect(response.headers['access-control-allow-methods']).toContain('DELETE');
 
     await app.close();
     await rm(config.SCREENSHOT_STORAGE_DIR, { recursive: true, force: true });

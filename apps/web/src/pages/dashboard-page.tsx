@@ -1,4 +1,4 @@
-import { startTransition } from 'react';
+import { startTransition, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 
@@ -9,9 +9,13 @@ import { buildDashboardSummary, createMonitoredApp, getMonitoredApps } from '../
 export function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const createSectionRef = useRef<HTMLDivElement | null>(null);
+  const createInputRef = useRef<HTMLInputElement | null>(null);
+  const [isCreateFormHighlighted, setIsCreateFormHighlighted] = useState(false);
   const monitoredAppsQuery = useQuery({
     queryKey: ['monitored-apps'],
-    queryFn: getMonitoredApps,
+    queryFn: ({ signal }) => getMonitoredApps(signal),
+    staleTime: 10_000,
     refetchInterval: 30_000
   });
 
@@ -27,6 +31,35 @@ export function DashboardPage() {
 
   const summary = buildDashboardSummary(monitoredAppsQuery.data ?? []);
 
+  useEffect(() => {
+    if (!isCreateFormHighlighted) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setIsCreateFormHighlighted(false);
+    }, 1_800);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [isCreateFormHighlighted]);
+
+  const focusCreateForm = () => {
+    createSectionRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center'
+    });
+    setIsCreateFormHighlighted(false);
+
+    window.requestAnimationFrame(() => {
+      setIsCreateFormHighlighted(true);
+      window.setTimeout(() => {
+        createInputRef.current?.focus({ preventScroll: true });
+      }, 180);
+    });
+  };
+
   return (
     <div className="page-shell">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
@@ -39,7 +72,14 @@ export function DashboardPage() {
                 Register an Android app once, let the worker capture listing screenshots on a schedule, and review every shift in one timeline-oriented monitoring view.
               </p>
               <div className="flex flex-wrap gap-3">
-                <a href="#create-app" className="button-primary">
+                <a
+                  href="#create-app"
+                  className="button-primary"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    focusCreateForm();
+                  }}
+                >
                   Create monitored app
                 </a>
                 {monitoredAppsQuery.data?.[0] ? (
@@ -57,13 +97,15 @@ export function DashboardPage() {
             <StatCard label="Captured screenshots" value={`${summary.totalSnapshots}`} />
           </div>
 
-          <div id="create-app">
+          <div id="create-app" ref={createSectionRef}>
             <MonitoredAppForm
+              className={isCreateFormHighlighted ? 'create-form-spotlight' : undefined}
               title="Add monitored app"
               description="Paste the Google Play URL, choose the market context, and start collecting evidence immediately."
               submitLabel="Start monitoring"
               submitPendingLabel="Creating..."
               helperText="First screenshot is scheduled immediately after creation."
+              sourceUrlInputRef={createInputRef}
               defaultValues={{
                 sourceUrl: '',
                 region: 'US',

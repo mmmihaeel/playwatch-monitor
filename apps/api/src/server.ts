@@ -10,7 +10,7 @@ async function start() {
   const storage = createStorageAdapter(config);
   const app = await buildApp({
     config,
-    services: buildApiServices(database, config),
+    services: buildApiServices(database, config, storage),
     storage
   });
 

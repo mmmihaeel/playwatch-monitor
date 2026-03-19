@@ -1,4 +1,4 @@
-import { and, count, desc, eq, getTableColumns, sql } from 'drizzle-orm';
+import { and, count, desc, eq, getTableColumns, isNotNull, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 
 import type { MonitoredAppUpdateInput, SnapshotQuery } from '@playwatch/shared';
@@ -7,6 +7,15 @@ import type { DatabaseHandle } from './client.js';
 import { appSnapshots, monitoredApps, type AppSnapshotRecord, type MonitoredAppRecord } from './schema.js';
 
 const monitoredAppColumns = getTableColumns(monitoredApps);
+const PG_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function quoteIdentifier(identifier: string) {
+  if (!PG_IDENTIFIER_PATTERN.test(identifier)) {
+    throw new Error('Invalid PostgreSQL identifier.');
+  }
+
+  return `"${identifier}"`;
+}
 
 function buildSnapshotCountJoin(database: DatabaseHandle) {
   return database.db
@@ -108,6 +117,28 @@ export function createMonitoredAppsRepository(database: DatabaseHandle) {
 
       return rows[0] ?? null;
     },
+    async delete(id: string) {
+      const rows = await database.db
+        .delete(monitoredApps)
+        .where(eq(monitoredApps.id, id))
+        .returning();
+
+      return rows[0] ?? null;
+    },
+    async deleteQueuedCaptureJobs(monitoredAppId: string, pgBossSchema: string) {
+      const schemaIdentifier = quoteIdentifier(pgBossSchema);
+      const result = await database.pool.query(
+        `
+          delete from ${schemaIdentifier}.job
+          where name = $1
+            and data ->> 'monitoredAppId' = $2
+            and state in ('created', 'retry')
+        `,
+        ['capture-listing', monitoredAppId]
+      );
+
+      return result.rowCount ?? 0;
+    },
     async claimDue(limit: number, now: Date) {
       const client = await database.pool.connect();
 
@@ -194,6 +225,20 @@ export function createSnapshotsRepository(database: DatabaseHandle) {
         .limit(1);
 
       return rows[0] ?? null;
+    },
+    async listObjectKeysByMonitoredAppId(monitoredAppId: string) {
+      const rows = await database.db
+        .select({
+          objectKey: appSnapshots.objectKey
+        })
+        .from(appSnapshots)
+        .where(and(
+          eq(appSnapshots.monitoredAppId, monitoredAppId),
+          isNotNull(appSnapshots.objectKey)
+        ))
+        .orderBy(desc(appSnapshots.capturedAt));
+
+      return rows.map((row) => row.objectKey);
     },
     async recordSuccess(input: {
       monitoredAppId: string;

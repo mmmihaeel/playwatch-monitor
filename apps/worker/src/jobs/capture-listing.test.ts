@@ -45,13 +45,23 @@ describe('captureListingJob', () => {
     });
 
     const monitoredAppsRepository = {
-      getById: vi.fn().mockResolvedValue({
-        id: 'app-1',
-        packageId: 'com.example.app',
-        region: 'US',
-        locale: 'en-US',
-        captureFrequencyMinutes: 60
-      })
+      getById: vi.fn()
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
     };
     const snapshotsRepository = {
       recordSuccess: vi.fn().mockResolvedValue({ id: 'snapshot-1' }),
@@ -59,7 +69,8 @@ describe('captureListingJob', () => {
     };
     const storage = {
       save: vi.fn().mockResolvedValue(undefined),
-      read: vi.fn()
+      read: vi.fn(),
+      remove: vi.fn()
     };
 
     await captureListingJob({
@@ -73,6 +84,7 @@ describe('captureListingJob', () => {
     expect(storage.save).toHaveBeenCalledTimes(1);
     expect(snapshotsRepository.recordSuccess).toHaveBeenCalledTimes(1);
     expect(snapshotsRepository.recordFailure).not.toHaveBeenCalled();
+    expect(monitoredAppsRepository.getById).toHaveBeenCalledTimes(2);
     expect(monitoredAppsRepository.getById).toHaveBeenCalledWith('app-1');
   });
 
@@ -87,13 +99,23 @@ describe('captureListingJob', () => {
     );
 
     const monitoredAppsRepository = {
-      getById: vi.fn().mockResolvedValue({
-        id: 'app-1',
-        packageId: 'com.example.app',
-        region: 'US',
-        locale: 'en-US',
-        captureFrequencyMinutes: 60
-      }),
+      getById: vi.fn()
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        }),
       update: vi.fn().mockResolvedValue({ id: 'app-1' })
     };
     const snapshotsRepository = {
@@ -102,7 +124,8 @@ describe('captureListingJob', () => {
     };
     const storage = {
       save: vi.fn(),
-      read: vi.fn()
+      read: vi.fn(),
+      remove: vi.fn()
     };
 
     await captureListingJob({
@@ -124,6 +147,7 @@ describe('captureListingJob', () => {
       nextCaptureAt?: Date;
     }];
 
+    expect(monitoredAppsRepository.getById).toHaveBeenCalledTimes(2);
     expect(updateCall[0]).toBe('app-1');
     expect(updateCall[1].nextCaptureAt).toBeInstanceOf(Date);
   });
@@ -139,7 +163,8 @@ describe('captureListingJob', () => {
     };
     const storage = {
       save: vi.fn(),
-      read: vi.fn()
+      read: vi.fn(),
+      remove: vi.fn()
     };
 
     const result = await captureListingJob({
@@ -155,6 +180,98 @@ describe('captureListingJob', () => {
     expect(snapshotsRepository.recordFailure).not.toHaveBeenCalled();
   });
 
+  it('drops a successful capture when the monitored app disappears before persistence', async () => {
+    capturePlayStoreListingMock.mockResolvedValue({
+      title: 'Example title',
+      buffer: Buffer.from('png-data')
+    });
+
+    const monitoredAppsRepository = {
+      getById: vi.fn()
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
+        .mockResolvedValueOnce(null)
+    };
+    const snapshotsRepository = {
+      recordSuccess: vi.fn(),
+      recordFailure: vi.fn()
+    };
+    const storage = {
+      save: vi.fn().mockResolvedValue(undefined),
+      read: vi.fn(),
+      remove: vi.fn()
+    };
+
+    const result = await captureListingJob({
+      config,
+      monitoredAppsRepository: monitoredAppsRepository as never,
+      snapshotsRepository: snapshotsRepository as never,
+      storage,
+      monitoredAppId: 'app-1'
+    });
+
+    expect(result).toBeNull();
+    expect(storage.save).not.toHaveBeenCalled();
+    expect(snapshotsRepository.recordSuccess).not.toHaveBeenCalled();
+  });
+
+  it('removes a screenshot if persistence fails after the file is saved', async () => {
+    capturePlayStoreListingMock.mockResolvedValue({
+      title: 'Example title',
+      buffer: Buffer.from('png-data')
+    });
+
+    const monitoredAppsRepository = {
+      getById: vi.fn()
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
+        .mockResolvedValueOnce(null),
+      update: vi.fn()
+    };
+    const snapshotsRepository = {
+      recordSuccess: vi.fn().mockRejectedValue(new Error('insert failed')),
+      recordFailure: vi.fn()
+    };
+    const storage = {
+      save: vi.fn().mockResolvedValue(undefined),
+      read: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const result = await captureListingJob({
+      config,
+      monitoredAppsRepository: monitoredAppsRepository as never,
+      snapshotsRepository: snapshotsRepository as never,
+      storage,
+      monitoredAppId: 'app-1'
+    });
+
+    expect(result).toBeNull();
+    expect(storage.save).toHaveBeenCalledTimes(1);
+    expect(storage.remove).toHaveBeenCalledTimes(1);
+    expect(snapshotsRepository.recordFailure).not.toHaveBeenCalled();
+  });
+
   it('retries transient capture failures once before recording success', async () => {
     capturePlayStoreListingMock
       .mockRejectedValueOnce(new Error('page.goto: net::ERR_SOCKET_NOT_CONNECTED'))
@@ -164,13 +281,23 @@ describe('captureListingJob', () => {
       });
 
     const monitoredAppsRepository = {
-      getById: vi.fn().mockResolvedValue({
-        id: 'app-1',
-        packageId: 'com.example.app',
-        region: 'US',
-        locale: 'en-US',
-        captureFrequencyMinutes: 60
-      })
+      getById: vi.fn()
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
+        .mockResolvedValueOnce({
+          id: 'app-1',
+          packageId: 'com.example.app',
+          region: 'US',
+          locale: 'en-US',
+          captureFrequencyMinutes: 60,
+          isActive: true
+        })
     };
     const snapshotsRepository = {
       recordSuccess: vi.fn().mockResolvedValue({ id: 'snapshot-1' }),
@@ -178,7 +305,8 @@ describe('captureListingJob', () => {
     };
     const storage = {
       save: vi.fn().mockResolvedValue(undefined),
-      read: vi.fn()
+      read: vi.fn(),
+      remove: vi.fn()
     };
 
     await captureListingJob({

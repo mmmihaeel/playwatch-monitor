@@ -16,6 +16,7 @@
 4. Apply migrations with `pnpm db:migrate`.
 5. Start the stack with `pnpm dev` or `docker compose up --build -d`.
 6. Open `http://localhost:3000`.
+7. Remove monitors you no longer need from the detail page to stop captures and clear stored screenshots.
 
 ## Health Endpoints
 
@@ -44,6 +45,7 @@
 | Web loads but screenshots do not  | Worker has not completed the first capture yet | Check `docker compose logs -f worker` and wait for the first success                                                                         |
 | API health fails                  | API or PostgreSQL is not ready                 | Inspect `docker compose ps` and API logs                                                                                                     |
 | Duplicate package error on create | The package is already monitored               | Open the existing monitor from the list instead of creating another                                                                          |
+| Old screenshots keep accumulating | Stale monitors were left active                | Delete the monitor from its detail page so the app row, stored screenshots, and pending queued captures are cleaned up                      |
 | Screenshots 404                   | Storage path mismatch                          | Verify `SCREENSHOT_STORAGE_DRIVER`, `SCREENSHOT_STORAGE_DIR`, `STORAGE_PUBLIC_PATH`, and `GCS_BUCKET_NAME` are aligned across API and worker |
 
 ## Production-Oriented Notes

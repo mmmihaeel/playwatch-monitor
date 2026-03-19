@@ -58,13 +58,17 @@ async function request<TSchema extends ZodTypeAny>(
   init: RequestInit,
   schema: TSchema
 ): Promise<TSchema['_output']> {
+  const headers = new Headers(init.headers ?? {});
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  if (init.body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   const response = await fetch(input, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {})
-    },
-    signal: AbortSignal.timeout(15_000)
+    headers,
+    signal: init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
   });
 
   const payload: unknown = await response.json().catch(() => null);
@@ -90,15 +94,19 @@ export function resolveAssetUrl(assetPath: string | null) {
   return new URL(assetPath, apiOrigin).toString();
 }
 
-export async function getMonitoredApps() {
-  const response = await request(`${apiBaseUrl}/monitored-apps`, { method: 'GET' }, monitoredAppListResponseSchema);
+export async function getMonitoredApps(signal?: AbortSignal) {
+  const response = await request(
+    `${apiBaseUrl}/monitored-apps`,
+    { method: 'GET', signal },
+    monitoredAppListResponseSchema
+  );
   return response.data;
 }
 
-export async function getMonitoredApp(monitoredAppId: string) {
+export async function getMonitoredApp(monitoredAppId: string, signal?: AbortSignal) {
   const response = await request(
     `${apiBaseUrl}/monitored-apps/${monitoredAppId}`,
-    { method: 'GET' },
+    { method: 'GET', signal },
     monitoredAppResponseSchema
   );
 
@@ -133,11 +141,21 @@ export async function updateMonitoredApp(monitoredAppId: string, input: Monitore
   return response.data;
 }
 
+export async function deleteMonitoredApp(monitoredAppId: string) {
+  await request(
+    `${apiBaseUrl}/monitored-apps/${monitoredAppId}`,
+    {
+      method: 'DELETE'
+    },
+    apiErrorSchema.nullable().transform(() => undefined)
+  );
+}
+
 export async function getSnapshots(input: {
   monitoredAppId: string;
   status: 'all' | SnapshotDto['status'];
   changed: 'all' | 'true' | 'false';
-}) {
+}, signal?: AbortSignal) {
   const query = new URLSearchParams();
   query.set('limit', '30');
 
@@ -151,7 +169,7 @@ export async function getSnapshots(input: {
 
   const response = await request(
     `${apiBaseUrl}/monitored-apps/${input.monitoredAppId}/snapshots?${query.toString()}`,
-    { method: 'GET' },
+    { method: 'GET', signal },
     snapshotListResponseSchema
   );
 

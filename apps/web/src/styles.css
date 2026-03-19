@@ -154,6 +154,27 @@
     @apply bg-cyan-600 text-white border-transparent shadow-lg shadow-cyan-900/15 hover:bg-cyan-500 dark:bg-cyan-500 dark:text-slate-950;
   }
 
+  .button-danger {
+    @apply inline-flex items-center justify-center rounded-full border px-5 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-4;
+    background: var(--danger-soft);
+    border-color: rgba(190, 24, 93, 0.18);
+    color: rgb(190 24 93);
+  }
+
+  .button-danger:hover {
+    @apply -translate-y-0.5;
+    border-color: rgba(190, 24, 93, 0.28);
+  }
+
+  .button-danger:focus-visible {
+    @apply ring-rose-400/25;
+  }
+
+  html.dark .button-danger {
+    border-color: rgba(251, 113, 133, 0.22);
+    color: rgb(253 164 175);
+  }
+
   .input-control {
     @apply w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-500/40 focus:ring-4 focus:ring-cyan-400/15 dark:border-white/10 dark:bg-slate-950/50 dark:text-slate-100 dark:placeholder:text-slate-500;
   }
@@ -263,6 +284,24 @@
 
   .dialog-content {
     @apply fixed left-1/2 top-1/2 max-h-[calc(100vh-32px)] w-[min(760px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 overflow-auto;
+  }
+
+  .create-form-spotlight {
+    box-shadow:
+      0 0 0 1px rgba(12, 180, 206, 0.18),
+      0 0 0 10px rgba(12, 180, 206, 0.08),
+      var(--surface-shadow);
+    transform: translateY(-2px);
+    transition:
+      box-shadow 180ms ease,
+      transform 180ms ease;
+  }
+
+  html.dark .create-form-spotlight {
+    box-shadow:
+      0 0 0 1px rgba(88, 213, 228, 0.24),
+      0 0 0 12px rgba(88, 213, 228, 0.08),
+      var(--surface-shadow);
   }
 
   .theme-control-shell {

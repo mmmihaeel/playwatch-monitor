@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { Route, Routes } from 'react-router-dom';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MonitoredAppDto } from '@playwatch/shared';
 
@@ -22,9 +22,18 @@ vi.mock('../lib/api.js', () => ({
 const { createMonitoredApp, getMonitoredApps } = await import('../lib/api.js');
 const getMonitoredAppsMock = vi.mocked(getMonitoredApps);
 const createMonitoredAppMock = vi.mocked(createMonitoredApp);
+const scrollIntoViewMock = vi.fn();
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
+});
+
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: scrollIntoViewMock
+  });
 });
 
 describe('DashboardPage', () => {
@@ -123,5 +132,39 @@ describe('DashboardPage', () => {
       });
     });
     await screen.findByText('detail route');
+  });
+
+  it('highlights and focuses the create form when the hero CTA is pressed', async () => {
+    getMonitoredAppsMock.mockResolvedValue([]);
+    createMonitoredAppMock.mockResolvedValue({
+      id: '770e8400-e29b-41d4-a716-446655440000',
+      packageId: 'com.spotify.music',
+      title: null,
+      sourceUrl: 'https://play.google.com/store/apps/details?id=com.spotify.music',
+      region: 'US',
+      locale: 'en-US',
+      captureFrequencyMinutes: 60,
+      nextCaptureAt: '2026-03-19T08:00:00.000Z',
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      isActive: true,
+      snapshotCount: 0,
+      createdAt: '2026-03-19T07:00:00.000Z',
+      updatedAt: '2026-03-19T07:00:00.000Z'
+    });
+
+    renderWithProviders(<DashboardPage />);
+
+    const cta = screen.getByRole('link', { name: 'Create monitored app' });
+    const formRegion = screen.getByRole('region', { name: 'Add monitored app' });
+    const sourceUrlInput = screen.getByRole('textbox', { name: /Google Play URL/i });
+
+    fireEvent.click(cta);
+
+    await waitFor(() => {
+      expect(scrollIntoViewMock).toHaveBeenCalled();
+      expect(sourceUrlInput).toHaveFocus();
+      expect(formRegion).toHaveClass('create-form-spotlight');
+    }, { timeout: 1_000 });
   });
 });

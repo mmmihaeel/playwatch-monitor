@@ -104,6 +104,12 @@ export async function captureListingJob(input: {
       throw new Error('Capture did not produce a result.');
     }
 
+    const latestMonitoredApp = await input.monitoredAppsRepository.getById(input.monitoredAppId);
+
+    if (!latestMonitoredApp || !latestMonitoredApp.isActive) {
+      return null;
+    }
+
     const objectKey = buildScreenshotObjectKey(monitoredApp.packageId, capturedAt);
     const contentHash = createHash('sha256').update(capture.buffer).digest('hex');
 
@@ -111,13 +117,24 @@ export async function captureListingJob(input: {
       contentType: 'image/png'
     });
 
-    return input.snapshotsRepository.recordSuccess({
-      monitoredAppId: monitoredApp.id,
-      title: capture.title,
-      objectKey,
-      capturedAt,
-      contentHash
-    });
+    try {
+      return await input.snapshotsRepository.recordSuccess({
+        monitoredAppId: monitoredApp.id,
+        title: capture.title,
+        objectKey,
+        capturedAt,
+        contentHash
+      });
+    } catch (error) {
+      await input.storage.remove(objectKey);
+
+      const refreshedMonitoredApp = await input.monitoredAppsRepository.getById(input.monitoredAppId);
+      if (!refreshedMonitoredApp) {
+        return null;
+      }
+
+      throw error;
+    }
   } catch (error) {
     console.error('Failed to capture Google Play listing.', {
       monitoredAppId: monitoredApp.id,
@@ -126,6 +143,11 @@ export async function captureListingJob(input: {
     });
 
     const failureReason = formatFailureReason(error);
+    const currentMonitoredApp = await input.monitoredAppsRepository.getById(input.monitoredAppId);
+
+    if (!currentMonitoredApp || !currentMonitoredApp.isActive) {
+      return null;
+    }
 
     const snapshot = await input.snapshotsRepository.recordFailure({
       monitoredAppId: monitoredApp.id,
@@ -134,7 +156,7 @@ export async function captureListingJob(input: {
     });
 
     await input.monitoredAppsRepository.update(monitoredApp.id, {
-      nextCaptureAt: buildFailureRetryDate(capturedAt, monitoredApp.captureFrequencyMinutes)
+      nextCaptureAt: buildFailureRetryDate(capturedAt, currentMonitoredApp.captureFrequencyMinutes)
     });
 
     return snapshot;

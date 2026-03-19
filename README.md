@@ -10,7 +10,7 @@ PlayWatch Monitor tracks Google Play listing changes for a curated set of Androi
 | Scheduling   | Queues the first capture immediately, then keeps each app on its own capture cadence                |
 | Capture      | Uses Playwright to open the Play Store listing, collect the title, and store a screenshot           |
 | Timeline     | Shows the newest screenshots first, with capture time, success state, change state, and storage key |
-| Operations   | Ships with Docker Compose, SQL migrations, tests, and CI verification                               |
+| Operations   | Ships with Docker Compose, SQL migrations, tests, CI verification, and monitor cleanup workflows    |
 
 ## Architecture
 
@@ -116,6 +116,7 @@ In the Docker build the Nginx web container proxies `/api/*` and `/assets/screen
 3. Wait for the first capture, which is scheduled immediately.
 4. Open the app detail page to review the timeline.
 5. Edit a monitor at any time to adjust cadence, market context, or active state.
+6. Delete a monitor when it is no longer needed to remove its screenshots and stop future captures.
 
 ## Quality Gates
 
@@ -181,12 +182,12 @@ The repository is prepared for container-based deployment, and it now ships a ch
 
 Production deployment is driven by [deploy-gcp.yml](./.github/workflows/deploy-gcp.yml). The workflow:
 
-1. Optionally runs `pnpm audit --prod` and `pnpm check`.
+1. Verifies the pushed commit already passed the `CI` workflow before any release steps run.
 2. Builds immutable `api`, `api-migrate`, `web`, and `worker` images in Artifact Registry.
 3. Ensures the GCS bucket, runtime service accounts, subnets, firewall rules, and VM exist.
-4. Starts PostgreSQL on the VM, runs migrations through a Cloud Run job on the private VPC path, then deploys `api` and `web` to Cloud Run.
-5. Re-points the public web service at the API Cloud Run URL so the browser keeps using same-origin `/api` and `/assets/screenshots`.
-6. Copies the checked-in worker/PostgreSQL compose bundle to the VM over IAP SSH and restarts the worker.
+4. Syncs the worker VM runtime bundle, only recreates PostgreSQL when its runtime inputs changed, and runs migrations over the private path.
+5. Deploys candidate `api` and `web` Cloud Run revisions with `--no-traffic`, smoke-tests them, and only then promotes live traffic.
+6. Copies the checked-in worker/PostgreSQL compose bundle to the VM over IAP SSH and recreates the worker with the new release image.
 
 The concrete rollout assets live in [deploy/gcp/README.md](./deploy/gcp/README.md), the reusable environment template lives in [config.env.example](./deploy/gcp/config.env.example), and the high-level cloud mapping is documented in [deployment.md](./docs/deployment.md).
 

@@ -8,13 +8,15 @@ import { MonitoredAppPage } from './monitored-app-page.js';
 
 vi.mock('../lib/api.js', () => ({
   ApiError: class ApiError extends Error {},
+  deleteMonitoredApp: vi.fn(),
   getMonitoredApps: vi.fn(),
   getMonitoredApp: vi.fn(),
   getSnapshots: vi.fn(),
   updateMonitoredApp: vi.fn()
 }));
 
-const { getMonitoredApp, getMonitoredApps, getSnapshots, updateMonitoredApp } = await import('../lib/api.js');
+const { deleteMonitoredApp, getMonitoredApp, getMonitoredApps, getSnapshots, updateMonitoredApp } = await import('../lib/api.js');
+const deleteMonitoredAppMock = vi.mocked(deleteMonitoredApp);
 const getMonitoredAppsMock = vi.mocked(getMonitoredApps);
 const getMonitoredAppMock = vi.mocked(getMonitoredApp);
 const getSnapshotsMock = vi.mocked(getSnapshots);
@@ -51,6 +53,7 @@ describe('MonitoredAppPage', () => {
     getMonitoredAppsMock.mockResolvedValue([updatedFixture]);
     getMonitoredAppMock.mockResolvedValueOnce(monitoredAppFixture).mockResolvedValue(updatedFixture);
     getSnapshotsMock.mockResolvedValue([]);
+    deleteMonitoredAppMock.mockResolvedValue(undefined);
     updateMonitoredAppMock.mockResolvedValue(updatedFixture);
 
     renderWithProviders(
@@ -91,6 +94,7 @@ describe('MonitoredAppPage', () => {
     getMonitoredAppsMock.mockResolvedValue([monitoredAppFixture]);
     getMonitoredAppMock.mockResolvedValue(monitoredAppFixture);
     getSnapshotsMock.mockResolvedValue([]);
+    deleteMonitoredAppMock.mockResolvedValue(undefined);
     updateMonitoredAppMock.mockResolvedValue(monitoredAppFixture);
 
     renderWithProviders(
@@ -116,11 +120,41 @@ describe('MonitoredAppPage', () => {
     });
 
     await waitFor(() => {
-      expect(getSnapshotsMock).toHaveBeenLastCalledWith({
-        monitoredAppId: monitoredAppFixture.id,
-        status: 'failed',
-        changed: 'all'
-      });
+      expect(getSnapshotsMock).toHaveBeenLastCalledWith(
+        {
+          monitoredAppId: monitoredAppFixture.id,
+          status: 'failed',
+          changed: 'all'
+        },
+        expect.any(AbortSignal)
+      );
     });
+  });
+
+  it('deletes a monitored app from the confirmation dialog', async () => {
+    getMonitoredAppsMock.mockResolvedValue([monitoredAppFixture]);
+    getMonitoredAppMock.mockResolvedValue(monitoredAppFixture);
+    getSnapshotsMock.mockResolvedValue([]);
+    deleteMonitoredAppMock.mockResolvedValue(undefined);
+    updateMonitoredAppMock.mockResolvedValue(monitoredAppFixture);
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<div>dashboard route</div>} />
+        <Route path="/apps/:appId" element={<MonitoredAppPage />} />
+      </Routes>,
+      {
+        initialEntries: ['/apps/550e8400-e29b-41d4-a716-446655440000']
+      }
+    );
+
+    await screen.findByRole('button', { name: 'Delete app' });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete app' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete monitored app' }));
+
+    await waitFor(() => {
+      expect(deleteMonitoredAppMock).toHaveBeenCalledWith(monitoredAppFixture.id);
+    });
+    await screen.findByText('dashboard route');
   });
 });
