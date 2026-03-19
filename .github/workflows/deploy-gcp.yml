@@ -21,7 +21,7 @@ on:
 
 concurrency:
   group: deploy-gcp-${{ github.event.inputs.environment || 'production' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   actions: read

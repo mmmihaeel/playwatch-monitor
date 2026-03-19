@@ -593,8 +593,76 @@ API_UPSTREAM_PORT: "${api_port}"
 EOF
 }
 
+get_service_url_if_exists() {
+  local service_name="$1"
+
+  if ! resource_exists gcloud run services describe "${service_name}" --region "${GCP_REGION}"; then
+    return 1
+  fi
+
+  gcloud run services describe "${service_name}" \
+    --region "${GCP_REGION}" \
+    --format='value(status.url)'
+}
+
+get_latest_service_revision() {
+  local service_name="$1"
+
+  gcloud run services describe "${service_name}" \
+    --region "${GCP_REGION}" \
+    --format='value(status.latestCreatedRevisionName)'
+}
+
+get_tagged_service_url() {
+  local service_name="$1"
+  local tag_name="$2"
+
+  gcloud run services describe "${service_name}" \
+    --region "${GCP_REGION}" \
+    --format=json | python3 -c '
+import json
+import sys
+
+service = json.load(sys.stdin)
+tag = sys.argv[1]
+
+for traffic in service.get("status", {}).get("traffic", []):
+    if traffic.get("tag") == tag and traffic.get("url"):
+        print(traffic["url"])
+        raise SystemExit(0)
+
+raise SystemExit(1)
+' "${tag_name}"
+}
+
+wait_for_tagged_service_url() {
+  local service_name="$1"
+  local tag_name="$2"
+
+  for _attempt in {1..30}; do
+    if SERVICE_TAG_URL="$(get_tagged_service_url "${service_name}" "${tag_name}" 2>/dev/null)"; then
+      printf '%s' "${SERVICE_TAG_URL}"
+      return 0
+    fi
+    sleep 2
+  done
+
+  fail "Timed out waiting for tagged URL ${tag_name} on ${service_name}"
+}
+
 ensure_api_service() {
   local env_file="$1"
+  local traffic_flag="${2:-}"
+  local tag_name="${3:-}"
+  local -a deploy_args=()
+
+  if [[ -n "${traffic_flag}" ]]; then
+    deploy_args+=("${traffic_flag}")
+  fi
+
+  if [[ -n "${tag_name}" ]]; then
+    deploy_args+=(--tag "${tag_name}")
+  fi
 
   gcloud run deploy "${GCP_API_SERVICE_NAME}" \
     --image "${IMAGE_API}" \
@@ -611,11 +679,23 @@ ensure_api_service() {
     --network "${GCP_NETWORK}" \
     --subnet "${GCP_SERVERLESS_SUBNET}" \
     --vpc-egress private-ranges-only \
-    --env-vars-file "${env_file}" >/dev/null
+    --env-vars-file "${env_file}" \
+    "${deploy_args[@]}" >/dev/null
 }
 
 ensure_web_service() {
   local env_file="$1"
+  local traffic_flag="${2:-}"
+  local tag_name="${3:-}"
+  local -a deploy_args=()
+
+  if [[ -n "${traffic_flag}" ]]; then
+    deploy_args+=("${traffic_flag}")
+  fi
+
+  if [[ -n "${tag_name}" ]]; then
+    deploy_args+=(--tag "${tag_name}")
+  fi
 
   gcloud run deploy "${GCP_WEB_SERVICE_NAME}" \
     --image "${IMAGE_WEB}" \
@@ -629,7 +709,17 @@ ensure_web_service() {
     --memory 256Mi \
     --port 8080 \
     --service-account "${GCP_WEB_SERVICE_ACCOUNT}" \
-    --env-vars-file "${env_file}" >/dev/null
+    --env-vars-file "${env_file}" \
+    "${deploy_args[@]}" >/dev/null
+}
+
+promote_service_revision() {
+  local service_name="$1"
+  local revision_name="$2"
+
+  gcloud run services update-traffic "${service_name}" \
+    --region "${GCP_REGION}" \
+    --to-revisions "${revision_name}=100" >/dev/null
 }
 
 ensure_migration_job() {
@@ -717,12 +807,37 @@ host    all             all             172.16.0.0/12           scram-sha-256
 EOF
 }
 
+render_postgres_signature_file() {
+  local destination="$1"
+
+  {
+    awk '
+      /^  postgres:/ { in_postgres=1 }
+      /^  worker:/ { in_postgres=0 }
+      in_postgres { print }
+    ' deploy/gcp/vm/docker-compose.yml
+    printf 'POSTGRES_DB=%s\n' "${APP_DATABASE_NAME}"
+    printf 'POSTGRES_USER=%s\n' "${APP_DATABASE_USER}"
+    printf 'POSTGRES_PASSWORD=%s\n' "${APP_DATABASE_PASSWORD}"
+    printf 'POSTGRES_SHARED_BUFFERS=%s\n' '128MB'
+    printf 'POSTGRES_MAX_CONNECTIONS=%s\n' '50'
+    printf 'POSTGRES_WORK_MEM=%s\n' '4MB'
+    printf 'GCP_SERVERLESS_SUBNET_CIDR=%s\n' "${GCP_SERVERLESS_SUBNET_CIDR}"
+  } >"${destination}"
+}
+
 sync_vm_runtime_bundle() {
   local temp_dir web_origin="$1"
+  local postgres_signature
 
   temp_dir="$(mktemp -d)"
   render_vm_env_file "${temp_dir}/.env" "${web_origin}"
   render_pg_hba_file "${temp_dir}/pg_hba.conf"
+  render_postgres_signature_file "${temp_dir}/postgres.signature"
+  postgres_signature="$(
+    cat "${temp_dir}/postgres.signature" "${temp_dir}/pg_hba.conf" | sha256sum | awk '{ print $1 }'
+  )"
+  printf '%s' "${postgres_signature}" >"${temp_dir}/.postgres-release.sha"
 
   run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
@@ -755,6 +870,33 @@ sync_vm_runtime_bundle() {
     "${temp_dir}/pg_hba.conf" \
     "${GCP_VM_NAME}:~/playwatch-release/postgres/pg_hba.conf" >/dev/null
 
+  run_vm_scp \
+    --zone "${GCP_ZONE}" \
+    --tunnel-through-iap \
+    --ssh-key-expire-after=10m \
+    "${temp_dir}/.postgres-release.sha" \
+    "${GCP_VM_NAME}:~/playwatch-release/.postgres-release.sha" >/dev/null
+
+  POSTGRES_RUNTIME_CHANGED="$(
+    run_vm_ssh "${GCP_VM_NAME}" \
+      --zone "${GCP_ZONE}" \
+      --tunnel-through-iap \
+      --ssh-key-expire-after=10m \
+      --command "
+        set -euo pipefail
+        current=''
+        if [[ -f /opt/playwatch/runtime/.postgres-release.sha ]]; then
+          current=\$(cat /opt/playwatch/runtime/.postgres-release.sha)
+        fi
+        next=\$(cat ~/playwatch-release/.postgres-release.sha)
+        if [[ \"\${current}\" == \"\${next}\" ]]; then
+          printf 'false'
+        else
+          printf 'true'
+        fi
+      " | tr -d '\r'
+  )"
+
   run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
@@ -764,7 +906,7 @@ sync_vm_runtime_bundle() {
       sudo install -d -m 0755 /opt/playwatch/runtime/postgres
       sudo cp -R ~/playwatch-release/. /opt/playwatch/runtime/
       sudo chown -R root:root /opt/playwatch/runtime
-      sudo gcloud auth configure-docker '${GCP_REGION}-docker.pkg.dev' --quiet
+      sudo gcloud auth configure-docker '${GCP_REGION}-docker.pkg.dev' --quiet >/dev/null 2>&1
       cd /opt/playwatch/runtime
       sudo docker compose pull postgres worker migrate
     " >/dev/null
@@ -773,7 +915,12 @@ sync_vm_runtime_bundle() {
 }
 
 start_vm_postgres() {
-  log 'Starting PostgreSQL on the VM'
+  if [[ "${POSTGRES_RUNTIME_CHANGED:-true}" == 'true' ]]; then
+    log 'PostgreSQL runtime changed; recreating the database container'
+  else
+    log 'PostgreSQL runtime unchanged; keeping the existing database container'
+  fi
+
   run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
@@ -781,7 +928,11 @@ start_vm_postgres() {
     --command "
       set -euo pipefail
       cd /opt/playwatch/runtime
-      sudo docker compose up -d --force-recreate --remove-orphans postgres
+      if [[ '${POSTGRES_RUNTIME_CHANGED:-true}' == 'true' ]]; then
+        sudo docker compose up -d --force-recreate --remove-orphans postgres
+      elif ! sudo docker compose ps --status running postgres | grep -q postgres; then
+        sudo docker compose up -d --remove-orphans postgres
+      fi
       for attempt in {1..30}; do
         if sudo docker compose exec -T postgres pg_isready -U '${APP_DATABASE_USER}' -d '${APP_DATABASE_NAME}' >/dev/null 2>&1; then
           sudo docker compose exec -T postgres psql -U '${APP_DATABASE_USER}' -d '${APP_DATABASE_NAME}' -c 'SELECT pg_reload_conf();' >/dev/null
@@ -901,39 +1052,72 @@ DATABASE_URL="postgresql://$(urlencode "${APP_DATABASE_USER}"):$(urlencode "${AP
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEMP_DIR}"' EXIT
 
-sync_vm_runtime_bundle 'https://placeholder.invalid'
+CURRENT_WEB_SERVICE_URL=''
+if WEB_SERVICE_URL_CANDIDATE="$(get_service_url_if_exists "${GCP_WEB_SERVICE_NAME}" 2>/dev/null)"; then
+  CURRENT_WEB_SERVICE_URL="${WEB_SERVICE_URL_CANDIDATE}"
+fi
+
+INITIAL_WEB_ORIGIN="${CURRENT_WEB_SERVICE_URL:-https://placeholder.invalid}"
+
+sync_vm_runtime_bundle "${INITIAL_WEB_ORIGIN}"
 start_vm_postgres
 
 if [[ "${RUN_MIGRATIONS}" == 'true' ]]; then
   run_vm_migrations
 fi
 
-log 'Deploying Cloud Run API service'
-render_api_env_file "${TEMP_DIR}/api.env.yaml" 'https://placeholder.invalid'
-ensure_api_service "${TEMP_DIR}/api.env.yaml"
+log 'Deploying Cloud Run API candidate revision'
+render_api_env_file "${TEMP_DIR}/api.env.yaml" "${INITIAL_WEB_ORIGIN}"
+ensure_api_service "${TEMP_DIR}/api.env.yaml" '--no-traffic' 'candidate'
+
+API_CANDIDATE_REVISION="$(get_latest_service_revision "${GCP_API_SERVICE_NAME}")"
+API_CANDIDATE_URL="$(wait_for_tagged_service_url "${GCP_API_SERVICE_NAME}" 'candidate')"
+wait_for_http_contains "${API_CANDIDATE_URL}/api/health" '"status":"ok"'
+wait_for_http_contains "${API_CANDIDATE_URL}/api/monitored-apps" '"data":'
+
+log 'Promoting Cloud Run API revision'
+promote_service_revision "${GCP_API_SERVICE_NAME}" "${API_CANDIDATE_REVISION}"
 
 API_SERVICE_URL="$(gcloud run services describe "${GCP_API_SERVICE_NAME}" --region "${GCP_REGION}" --format='value(status.url)')"
+wait_for_http_contains "${API_SERVICE_URL}/api/health" '"status":"ok"'
+wait_for_http_contains "${API_SERVICE_URL}/api/monitored-apps" '"data":'
 parse_service_url "${API_SERVICE_URL}"
 
-log 'Deploying Cloud Run web service'
+log 'Deploying Cloud Run web candidate revision'
 render_web_env_file "${TEMP_DIR}/web.env.yaml" "${SERVICE_URL_SCHEME}" "${SERVICE_URL_HOST}" "${SERVICE_URL_PORT}"
-ensure_web_service "${TEMP_DIR}/web.env.yaml"
+ensure_web_service "${TEMP_DIR}/web.env.yaml" '--no-traffic' 'candidate'
+
+WEB_CANDIDATE_REVISION="$(get_latest_service_revision "${GCP_WEB_SERVICE_NAME}")"
+WEB_CANDIDATE_URL="$(wait_for_tagged_service_url "${GCP_WEB_SERVICE_NAME}" 'candidate')"
+wait_for_http_contains "${WEB_CANDIDATE_URL}/" '<!doctype html>'
+wait_for_http_contains "${WEB_CANDIDATE_URL}/api/health" '"status":"ok"'
+wait_for_http_contains "${WEB_CANDIDATE_URL}/api/monitored-apps" '"data":'
+
+log 'Promoting Cloud Run web revision'
+promote_service_revision "${GCP_WEB_SERVICE_NAME}" "${WEB_CANDIDATE_REVISION}"
 
 WEB_SERVICE_URL="$(gcloud run services describe "${GCP_WEB_SERVICE_NAME}" --region "${GCP_REGION}" --format='value(status.url)')"
+wait_for_http_contains "${WEB_SERVICE_URL}/" '<!doctype html>'
+wait_for_http_contains "${WEB_SERVICE_URL}/api/health" '"status":"ok"'
+wait_for_http_contains "${WEB_SERVICE_URL}/api/monitored-apps" '"data":'
 
-log 'Refreshing API CORS origin for the public web URL'
-render_api_env_file "${TEMP_DIR}/api.env.yaml" "${WEB_SERVICE_URL}"
-ensure_api_service "${TEMP_DIR}/api.env.yaml"
+if [[ -z "${CURRENT_WEB_SERVICE_URL}" ]]; then
+  log 'Refreshing Cloud Run API CORS origin for the newly created web URL'
+  render_api_env_file "${TEMP_DIR}/api.env.yaml" "${WEB_SERVICE_URL}"
+  ensure_api_service "${TEMP_DIR}/api.env.yaml" '--no-traffic' 'candidate'
+  API_CANDIDATE_REVISION="$(get_latest_service_revision "${GCP_API_SERVICE_NAME}")"
+  API_CANDIDATE_URL="$(wait_for_tagged_service_url "${GCP_API_SERVICE_NAME}" 'candidate')"
+  wait_for_http_contains "${API_CANDIDATE_URL}/api/health" '"status":"ok"'
+  wait_for_http_contains "${API_CANDIDATE_URL}/api/monitored-apps" '"data":'
+  promote_service_revision "${GCP_API_SERVICE_NAME}" "${API_CANDIDATE_REVISION}"
+  API_SERVICE_URL="$(gcloud run services describe "${GCP_API_SERVICE_NAME}" --region "${GCP_REGION}" --format='value(status.url)')"
+  wait_for_http_contains "${API_SERVICE_URL}/api/health" '"status":"ok"'
+  wait_for_http_contains "${API_SERVICE_URL}/api/monitored-apps" '"data":'
+fi
 
 sync_vm_runtime_bundle "${WEB_SERVICE_URL}"
 start_vm_worker
 verify_remote_worker
-
-wait_for_http_contains "${API_SERVICE_URL}/api/health" '"status":"ok"'
-wait_for_http_contains "${WEB_SERVICE_URL}/api/health" '"status":"ok"'
-wait_for_http_contains "${API_SERVICE_URL}/api/monitored-apps" '"data":'
-wait_for_http_contains "${WEB_SERVICE_URL}/api/monitored-apps" '"data":'
-wait_for_http_contains "${WEB_SERVICE_URL}/" '<!doctype html>'
 
 write_output 'web_service_url' "${WEB_SERVICE_URL}"
 write_output 'api_service_url' "${API_SERVICE_URL}"
