@@ -89,6 +89,68 @@ write_output() {
   fi
 }
 
+is_retryable_ssh_error() {
+  local log_file="$1"
+
+  grep -Eq \
+    'Permission denied \(publickey\)|Connection closed by remote host|Connection refused|Operation timed out|Unable to connect to port 22|failed to connect to backend|kex_exchange_identification|connection reset by peer' \
+    "${log_file}"
+}
+
+run_vm_ssh() {
+  local output_file attempt exit_code
+
+  output_file="$(mktemp)"
+  for attempt in {1..8}; do
+    if gcloud compute ssh "$@" 2>"${output_file}"; then
+      rm -f "${output_file}"
+      return 0
+    fi
+
+    exit_code=$?
+    if (( attempt < 8 )) && is_retryable_ssh_error "${output_file}"; then
+      log "SSH attempt ${attempt} for ${GCP_VM_NAME} failed; retrying after a short delay"
+      sleep 10
+      continue
+    fi
+
+    cat "${output_file}" >&2
+    rm -f "${output_file}"
+    return "${exit_code}"
+  done
+
+  cat "${output_file}" >&2
+  rm -f "${output_file}"
+  return 1
+}
+
+run_vm_scp() {
+  local output_file attempt exit_code
+
+  output_file="$(mktemp)"
+  for attempt in {1..8}; do
+    if gcloud compute scp "$@" 2>"${output_file}"; then
+      rm -f "${output_file}"
+      return 0
+    fi
+
+    exit_code=$?
+    if (( attempt < 8 )) && is_retryable_ssh_error "${output_file}"; then
+      log "SCP attempt ${attempt} for ${GCP_VM_NAME} failed; retrying after a short delay"
+      sleep 10
+      continue
+    fi
+
+    cat "${output_file}" >&2
+    rm -f "${output_file}"
+    return "${exit_code}"
+  done
+
+  cat "${output_file}" >&2
+  rm -f "${output_file}"
+  return 1
+}
+
 ensure_project_binding() {
   local member="$1"
   local role="$2"
@@ -475,7 +537,7 @@ bootstrap_vm_runtime() {
 
   for attempt in {1..3}; do
     log "Bootstrapping VM runtime on ${GCP_VM_NAME} (attempt ${attempt}/3)"
-    if gcloud compute ssh "${GCP_VM_NAME}" \
+    if run_vm_ssh "${GCP_VM_NAME}" \
       --zone "${GCP_ZONE}" \
       --tunnel-through-iap \
       --ssh-key-expire-after=10m \
@@ -676,7 +738,7 @@ sync_vm_runtime_bundle() {
   render_vm_env_file "${vm_stage_dir}/.env" "${web_origin}"
   render_pg_hba_file "${vm_stage_dir}/postgres/pg_hba.conf"
 
-  gcloud compute scp \
+  run_vm_scp \
     --recurse \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
@@ -684,7 +746,7 @@ sync_vm_runtime_bundle() {
     "${vm_stage_dir}" \
     "${GCP_VM_NAME}:~/" >/dev/null
 
-  gcloud compute ssh "${GCP_VM_NAME}" \
+  run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
     --ssh-key-expire-after=10m \
@@ -703,7 +765,7 @@ sync_vm_runtime_bundle() {
 
 start_vm_postgres() {
   log 'Starting PostgreSQL on the VM'
-  gcloud compute ssh "${GCP_VM_NAME}" \
+  run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
     --ssh-key-expire-after=10m \
@@ -723,7 +785,7 @@ start_vm_postgres() {
 
 start_vm_worker() {
   log 'Starting worker on the VM'
-  gcloud compute ssh "${GCP_VM_NAME}" \
+  run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
     --ssh-key-expire-after=10m \
@@ -736,7 +798,7 @@ start_vm_worker() {
 }
 
 verify_remote_worker() {
-  gcloud compute ssh "${GCP_VM_NAME}" \
+  run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
     --ssh-key-expire-after=10m \
