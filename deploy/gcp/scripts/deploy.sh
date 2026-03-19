@@ -128,13 +128,6 @@ ensure_bucket_binding() {
   local member="$1"
   local role="$2"
 
-  if gcloud storage buckets get-iam-policy "gs://${GCP_BUCKET_NAME}" \
-    --flatten='bindings[].members' \
-    --filter="bindings.role=${role} AND bindings.members=${member}" \
-    --format='value(bindings.role)' | grep -qx "${role}"; then
-      return 0
-  fi
-
   gcloud storage buckets add-iam-policy-binding "gs://${GCP_BUCKET_NAME}" \
     --member "${member}" \
     --role "${role}" \
@@ -327,36 +320,97 @@ ensure_deployer_vm_access() {
   ensure_service_account_binding "${GCP_VM_SERVICE_ACCOUNT}" "serviceAccount:${active_account}" 'roles/iam.serviceAccountUser'
 }
 
-ensure_vm() {
+zone_candidates() {
+  local zone
+
+  printf '%s\n' "${GCP_ZONE}"
+  while IFS= read -r zone; do
+    if [[ -n "${zone}" && "${zone}" != "${GCP_ZONE}" ]]; then
+      printf '%s\n' "${zone}"
+    fi
+  done < <(gcloud compute zones list --filter="name~'^${GCP_REGION}-' AND status=UP" --format='value(name)')
+}
+
+update_vm_metadata() {
   local startup_script='deploy/gcp/vm/bootstrap.sh'
 
+  gcloud compute instances add-metadata "${GCP_VM_NAME}" \
+    --zone "${GCP_ZONE}" \
+    --metadata "enable-oslogin=TRUE,playwatch-artifact-registry-region=${GCP_REGION}" \
+    --metadata-from-file "startup-script=${startup_script}" >/dev/null
+
+  local status
+  status="$(gcloud compute instances describe "${GCP_VM_NAME}" --zone "${GCP_ZONE}" --format='value(status)')"
+  if [[ "${status}" == 'TERMINATED' ]]; then
+    gcloud compute instances start "${GCP_VM_NAME}" --zone "${GCP_ZONE}" >/dev/null
+  fi
+}
+
+ensure_vm() {
+  local startup_script='deploy/gcp/vm/bootstrap.sh'
+  local candidate_zone create_error
+
   if ! resource_exists gcloud compute instances describe "${GCP_VM_NAME}" --zone "${GCP_ZONE}"; then
-    log "Creating Compute Engine VM ${GCP_VM_NAME}"
-    gcloud compute instances create "${GCP_VM_NAME}" \
-      --zone "${GCP_ZONE}" \
-      --machine-type "${GCP_VM_MACHINE_TYPE}" \
-      --subnet "${GCP_VM_SUBNET}" \
-      --tags "${GCP_VM_TAG}" \
-      --service-account "${GCP_VM_SERVICE_ACCOUNT}" \
-      --scopes cloud-platform \
-      --image-family debian-12 \
-      --image-project debian-cloud \
-      --boot-disk-size 20GB \
-      --metadata "enable-oslogin=TRUE,playwatch-artifact-registry-region=${GCP_REGION}" \
-      --metadata-from-file "startup-script=${startup_script}" >/dev/null
+    while IFS= read -r candidate_zone; do
+      if resource_exists gcloud compute instances describe "${GCP_VM_NAME}" --zone "${candidate_zone}"; then
+        GCP_ZONE="${candidate_zone}"
+        log "Using existing Compute Engine VM ${GCP_VM_NAME} in ${GCP_ZONE}"
+        update_vm_metadata
+        return 0
+      fi
+    done < <(zone_candidates)
+
+    while IFS= read -r candidate_zone; do
+      create_error="$(mktemp)"
+      log "Creating Compute Engine VM ${GCP_VM_NAME} in ${candidate_zone}"
+      if gcloud compute instances create "${GCP_VM_NAME}" \
+        --zone "${candidate_zone}" \
+        --machine-type "${GCP_VM_MACHINE_TYPE}" \
+        --subnet "${GCP_VM_SUBNET}" \
+        --tags "${GCP_VM_TAG}" \
+        --service-account "${GCP_VM_SERVICE_ACCOUNT}" \
+        --scopes cloud-platform \
+        --image-family debian-12 \
+        --image-project debian-cloud \
+        --boot-disk-size 20GB \
+        --metadata "enable-oslogin=TRUE,playwatch-artifact-registry-region=${GCP_REGION}" \
+        --metadata-from-file "startup-script=${startup_script}" > /dev/null 2>"${create_error}"; then
+        GCP_ZONE="${candidate_zone}"
+        rm -f "${create_error}"
+        return 0
+      fi
+
+      if grep -Eq 'ZONE_RESOURCE_POOL_EXHAUSTED|does not have enough resources' "${create_error}"; then
+        log "Zone ${candidate_zone} is currently exhausted for ${GCP_VM_MACHINE_TYPE}; trying the next zone in ${GCP_REGION}"
+        rm -f "${create_error}"
+        continue
+      fi
+
+      cat "${create_error}" >&2
+      rm -f "${create_error}"
+      fail "Failed to create Compute Engine VM ${GCP_VM_NAME}"
+    done < <(zone_candidates)
+
+    fail "Unable to provision ${GCP_VM_MACHINE_TYPE} in any ${GCP_REGION} zone"
   else
     log "Updating VM startup metadata for ${GCP_VM_NAME}"
-    gcloud compute instances add-metadata "${GCP_VM_NAME}" \
-      --zone "${GCP_ZONE}" \
-      --metadata "enable-oslogin=TRUE,playwatch-artifact-registry-region=${GCP_REGION}" \
-      --metadata-from-file "startup-script=${startup_script}" >/dev/null
-
-    local status
-    status="$(gcloud compute instances describe "${GCP_VM_NAME}" --zone "${GCP_ZONE}" --format='value(status)')"
-    if [[ "${status}" == 'TERMINATED' ]]; then
-      gcloud compute instances start "${GCP_VM_NAME}" --zone "${GCP_ZONE}" >/dev/null
-    fi
+    update_vm_metadata
+    return 0
   fi
+
+  if resource_exists gcloud compute instances describe "${GCP_VM_NAME}" --zone "${GCP_ZONE}"; then
+    return 0
+  fi
+
+  while IFS= read -r candidate_zone; do
+    if resource_exists gcloud compute instances describe "${GCP_VM_NAME}" --zone "${candidate_zone}"; then
+      GCP_ZONE="${candidate_zone}"
+      update_vm_metadata
+      return 0
+    fi
+  done < <(zone_candidates)
+
+  fail "Compute Engine VM ${GCP_VM_NAME} was not found after provisioning"
 }
 
 wait_for_ssh() {
