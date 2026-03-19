@@ -64,7 +64,10 @@ export async function capturePlayStoreListing(input: {
 
     const pageTitle = await page.locator('h1').first().textContent().catch(() => null);
     const buffer = await page.screenshot({
+      animations: 'disabled',
+      caret: 'hide',
       fullPage: true,
+      timeout: input.timeoutMs,
       type: 'png'
     });
 
