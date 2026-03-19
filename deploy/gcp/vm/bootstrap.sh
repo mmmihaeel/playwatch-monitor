@@ -16,6 +16,54 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+acquire_bootstrap_lock() {
+  local lock_file='/var/lock/playwatch-bootstrap.lock'
+
+  if ! command -v flock >/dev/null 2>&1; then
+    return 0
+  fi
+
+  exec 9>"${lock_file}"
+  if ! flock -w 900 9; then
+    echo "Timed out waiting for bootstrap lock: ${lock_file}" >&2
+    exit 1
+  fi
+}
+
+wait_for_apt_locks() {
+  local deadline=$((SECONDS + 900))
+
+  if ! command -v fuser >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo 'Timed out waiting for apt/dpkg locks to clear' >&2
+      return 1
+    fi
+
+    sleep 5
+  done
+}
+
+run_apt_get() {
+  local attempt
+
+  for attempt in {1..5}; do
+    wait_for_apt_locks
+    if apt-get "$@"; then
+      return 0
+    fi
+
+    if (( attempt == 5 )); then
+      return 1
+    fi
+
+    sleep 5
+  done
+}
+
 ensure_package() {
   local command_name="$1"
   shift
@@ -24,8 +72,8 @@ ensure_package() {
     return 0
   fi
 
-  apt-get update
-  apt-get install -y "$@"
+  run_apt_get update
+  run_apt_get install -y "$@"
 }
 
 install_docker() {
@@ -33,8 +81,8 @@ install_docker() {
     return 0
   fi
 
-  apt-get update
-  apt-get install -y ca-certificates curl gnupg
+  run_apt_get update
+  run_apt_get install -y ca-certificates curl gnupg
   install -m 0755 -d /etc/apt/keyrings
 
   if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
@@ -48,8 +96,8 @@ install_docker() {
       $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
   fi
 
-  apt-get update
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  run_apt_get update
+  run_apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   systemctl enable docker
   systemctl restart docker
 }
@@ -59,8 +107,8 @@ install_gcloud() {
     return 0
   fi
 
-  apt-get update
-  apt-get install -y ca-certificates curl gnupg apt-transport-https
+  run_apt_get update
+  run_apt_get install -y ca-certificates curl gnupg apt-transport-https
   install -m 0755 -d /etc/apt/keyrings
 
   if [[ ! -f /etc/apt/keyrings/google-cloud.gpg ]]; then
@@ -73,8 +121,8 @@ install_gcloud() {
       | tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
   fi
 
-  apt-get update
-  apt-get install -y google-cloud-cli
+  run_apt_get update
+  run_apt_get install -y google-cloud-cli
 }
 
 ensure_swap() {
@@ -106,6 +154,7 @@ configure_docker_auth() {
   gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet >/dev/null || true
 }
 
+acquire_bootstrap_lock
 ensure_package bash bash
 ensure_package curl curl
 ensure_package python3 python3
