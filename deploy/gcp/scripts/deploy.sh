@@ -57,7 +57,7 @@ set_defaults() {
   : "${GCP_VM_SUBNET:=playwatch-prod-vm}"
   : "${GCP_VM_SUBNET_CIDR:=10.20.0.0/24}"
   : "${GCP_SERVERLESS_SUBNET:=playwatch-prod-serverless}"
-  : "${GCP_SERVERLESS_SUBNET_CIDR:=10.20.1.0/28}"
+  : "${GCP_SERVERLESS_SUBNET_CIDR:=10.20.1.0/24}"
   : "${GCP_ARTIFACT_REGISTRY_REPOSITORY:=playwatch}"
   : "${GCP_BUCKET_NAME:=${GCP_PROJECT_ID}-playwatch-screenshots}"
   : "${GCP_BUCKET_LOCATION:=${GCP_REGION}}"
@@ -766,6 +766,7 @@ start_vm_postgres() {
       sudo docker compose up -d postgres
       for attempt in {1..30}; do
         if sudo docker compose exec -T postgres pg_isready -U '${APP_DATABASE_USER}' -d '${APP_DATABASE_NAME}' >/dev/null 2>&1; then
+          sudo docker compose exec -T postgres psql -U '${APP_DATABASE_USER}' -d '${APP_DATABASE_NAME}' -c 'SELECT pg_reload_conf();' >/dev/null
           exit 0
         fi
         sleep 5

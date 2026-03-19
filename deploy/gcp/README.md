@@ -33,7 +33,7 @@ The deployment script can run with only `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_ZON
 | ---------------------- | ----------------------------------------------------- |
 | VPC network            | `playwatch-prod`                                      |
 | VM subnet              | `playwatch-prod-vm` (`10.20.0.0/24`)                  |
-| Cloud Run subnet       | `playwatch-prod-serverless` (`10.20.1.0/28`)          |
+| Cloud Run subnet       | `playwatch-prod-serverless` (`10.20.1.0/24`)          |
 | Artifact Registry repo | `playwatch`                                           |
 | Bucket name            | `${GCP_PROJECT_ID}-playwatch-screenshots`             |
 | VM shape               | `e2-micro`                                            |
