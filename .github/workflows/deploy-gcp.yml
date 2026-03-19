@@ -13,22 +13,18 @@ on:
         required: true
         default: true
         type: boolean
-      run_quality_gates:
-        description: Run lint, typecheck, tests, and builds before pushing images
-        required: true
-        default: true
-        type: boolean
       run_migrations:
-        description: Execute the Cloud Run migration job before updating services
+        description: Execute database migrations on the worker VM before updating services
         required: true
         default: true
         type: boolean
 
 concurrency:
   group: deploy-gcp-${{ github.event.inputs.environment || 'production' }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -107,6 +103,31 @@ jobs:
             exit 1
           fi
 
+      - name: Verify CI passed for this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          run_id="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=push&status=completed&per_page=20" \
+              --jq '.workflow_runs[] | select(.name=="CI") | .id' \
+              | head -n 1
+          )"
+
+          if [[ -z "${run_id}" ]]; then
+            echo "No completed CI run was found for ${GITHUB_SHA}. Push the commit first and wait for CI to finish." >&2
+            exit 1
+          fi
+
+          conclusion="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.conclusion')"
+          if [[ "${conclusion}" != "success" ]]; then
+            echo "CI run ${run_id} for ${GITHUB_SHA} concluded with ${conclusion}. Deployment is blocked." >&2
+            exit 1
+          fi
+
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -145,27 +166,6 @@ jobs:
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
       - uses: docker/setup-buildx-action@v3
-
-      - uses: pnpm/action-setup@v4
-        if: ${{ inputs.run_quality_gates }}
-        with:
-          version: 10.17.1
-
-      - uses: actions/setup-node@v4
-        if: ${{ inputs.run_quality_gates }}
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        if: ${{ inputs.run_quality_gates }}
-        run: pnpm install --frozen-lockfile
-
-      - name: Run production quality gates
-        if: ${{ inputs.run_quality_gates }}
-        run: |
-          pnpm audit --prod
-          pnpm check
 
       - id: meta
         name: Compute image metadata

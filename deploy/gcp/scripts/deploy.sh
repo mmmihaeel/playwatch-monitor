@@ -718,23 +718,42 @@ EOF
 }
 
 sync_vm_runtime_bundle() {
-  local temp_dir vm_stage_dir web_origin="$1"
+  local temp_dir web_origin="$1"
 
   temp_dir="$(mktemp -d)"
-  vm_stage_dir="${temp_dir}/playwatch-release"
-  mkdir -p "${vm_stage_dir}/postgres"
+  render_vm_env_file "${temp_dir}/.env" "${web_origin}"
+  render_pg_hba_file "${temp_dir}/pg_hba.conf"
 
-  cp deploy/gcp/vm/docker-compose.yml "${vm_stage_dir}/docker-compose.yml"
-  render_vm_env_file "${vm_stage_dir}/.env" "${web_origin}"
-  render_pg_hba_file "${vm_stage_dir}/postgres/pg_hba.conf"
-
-  run_vm_scp \
-    --recurse \
+  run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
     --tunnel-through-iap \
     --ssh-key-expire-after=10m \
-    "${vm_stage_dir}" \
-    "${GCP_VM_NAME}:~/" >/dev/null
+    --command "
+      set -euo pipefail
+      rm -rf ~/playwatch-release
+      mkdir -p ~/playwatch-release/postgres
+    " >/dev/null
+
+  run_vm_scp \
+    --zone "${GCP_ZONE}" \
+    --tunnel-through-iap \
+    --ssh-key-expire-after=10m \
+    deploy/gcp/vm/docker-compose.yml \
+    "${GCP_VM_NAME}:~/playwatch-release/docker-compose.yml" >/dev/null
+
+  run_vm_scp \
+    --zone "${GCP_ZONE}" \
+    --tunnel-through-iap \
+    --ssh-key-expire-after=10m \
+    "${temp_dir}/.env" \
+    "${GCP_VM_NAME}:~/playwatch-release/.env" >/dev/null
+
+  run_vm_scp \
+    --zone "${GCP_ZONE}" \
+    --tunnel-through-iap \
+    --ssh-key-expire-after=10m \
+    "${temp_dir}/pg_hba.conf" \
+    "${GCP_VM_NAME}:~/playwatch-release/postgres/pg_hba.conf" >/dev/null
 
   run_vm_ssh "${GCP_VM_NAME}" \
     --zone "${GCP_ZONE}" \
@@ -747,7 +766,7 @@ sync_vm_runtime_bundle() {
       sudo chown -R root:root /opt/playwatch/runtime
       sudo gcloud auth configure-docker '${GCP_REGION}-docker.pkg.dev' --quiet
       cd /opt/playwatch/runtime
-      sudo docker compose pull postgres worker
+      sudo docker compose pull postgres worker migrate
     " >/dev/null
 
   rm -rf "${temp_dir}"
@@ -762,7 +781,7 @@ start_vm_postgres() {
     --command "
       set -euo pipefail
       cd /opt/playwatch/runtime
-      sudo docker compose up -d postgres
+      sudo docker compose up -d --force-recreate --remove-orphans postgres
       for attempt in {1..30}; do
         if sudo docker compose exec -T postgres pg_isready -U '${APP_DATABASE_USER}' -d '${APP_DATABASE_NAME}' >/dev/null 2>&1; then
           sudo docker compose exec -T postgres psql -U '${APP_DATABASE_USER}' -d '${APP_DATABASE_NAME}' -c 'SELECT pg_reload_conf();' >/dev/null
@@ -796,7 +815,7 @@ start_vm_worker() {
     --command "
       set -euo pipefail
       cd /opt/playwatch/runtime
-      sudo docker compose up -d worker
+      sudo docker compose up -d --force-recreate --remove-orphans worker
       sudo docker compose ps
     " >/dev/null
 }
@@ -912,6 +931,8 @@ verify_remote_worker
 
 wait_for_http_contains "${API_SERVICE_URL}/api/health" '"status":"ok"'
 wait_for_http_contains "${WEB_SERVICE_URL}/api/health" '"status":"ok"'
+wait_for_http_contains "${API_SERVICE_URL}/api/monitored-apps" '"data":'
+wait_for_http_contains "${WEB_SERVICE_URL}/api/monitored-apps" '"data":'
 wait_for_http_contains "${WEB_SERVICE_URL}/" '<!doctype html>'
 
 write_output 'web_service_url' "${WEB_SERVICE_URL}"
