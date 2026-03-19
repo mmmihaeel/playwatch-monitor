@@ -27,7 +27,7 @@ RUN pnpm --filter @playwatch/storage build
 RUN pnpm --filter @playwatch/db build
 RUN pnpm --filter @playwatch/worker build
 
-FROM node:24-bookworm-slim
+FROM base
 WORKDIR /workspace
 
 ENV NODE_ENV=production
@@ -44,9 +44,8 @@ COPY --from=build /workspace/packages/db ./packages/db
 COPY --from=build /workspace/packages/shared ./packages/shared
 COPY --from=build /workspace/packages/storage ./packages/storage
 
-RUN npx playwright install --with-deps chromium
+RUN ./apps/worker/node_modules/.bin/playwright install --with-deps chromium
 RUN test -d /ms-playwright
-RUN chown -R playwatch:playwatch /workspace /ms-playwright
 
 USER playwatch
 
