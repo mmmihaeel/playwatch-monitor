@@ -360,7 +360,7 @@ ensure_runtime_service_accounts() {
   ensure_project_binding "serviceAccount:${GCP_VM_SERVICE_ACCOUNT}" 'roles/logging.logWriter'
   ensure_project_binding "serviceAccount:${GCP_VM_SERVICE_ACCOUNT}" 'roles/monitoring.metricWriter'
 
-  ensure_bucket_binding "serviceAccount:${GCP_API_SERVICE_ACCOUNT}" 'roles/storage.objectViewer'
+  ensure_bucket_binding "serviceAccount:${GCP_API_SERVICE_ACCOUNT}" 'roles/storage.objectUser'
   ensure_bucket_binding "serviceAccount:${GCP_VM_SERVICE_ACCOUNT}" 'roles/storage.objectUser'
 }
 
