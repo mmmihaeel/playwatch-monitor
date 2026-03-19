@@ -245,8 +245,11 @@ ensure_bucket() {
     gcloud storage buckets create "gs://${GCP_BUCKET_NAME}" \
       --location "${GCP_BUCKET_LOCATION}" \
       --uniform-bucket-level-access \
-      --public-access-prevention enforced >/dev/null
+      --public-access-prevention >/dev/null
   fi
+
+  gcloud storage buckets update "gs://${GCP_BUCKET_NAME}" \
+    --public-access-prevention >/dev/null
 
   if [[ "${GCP_BUCKET_RETENTION_DAYS}" =~ ^[0-9]+$ ]] && (( GCP_BUCKET_RETENTION_DAYS > 0 )); then
     lifecycle_file="$(mktemp)"
