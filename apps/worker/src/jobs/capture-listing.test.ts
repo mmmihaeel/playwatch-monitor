@@ -10,6 +10,7 @@ vi.mock('../lib/capture-play-store.js', () => ({
 }));
 
 const capturePlayStoreListingMock = vi.mocked(capturePlayStoreListing);
+const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 const config: AppConfig = {
   NODE_ENV: 'test',
@@ -140,9 +141,27 @@ describe('captureListingJob', () => {
     expect(snapshotsRepository.recordFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         monitoredAppId: 'app-1',
-        failureReason: 'browserType.launch: Executable does not exist'
+        failureReason: 'Worker browser runtime is unavailable. Rebuild the worker image with Playwright browsers installed.'
       })
     );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to capture Google Play listing.',
+      expect.objectContaining({
+        monitoredAppId: 'app-1',
+        packageId: 'com.example.app'
+      })
+    );
+    const [, loggedErrorContext] = consoleErrorSpy.mock.calls[0] as [string, unknown];
+
+    expect(loggedErrorContext).toBeTruthy();
+    expect(typeof loggedErrorContext).toBe('object');
+    expect(loggedErrorContext).toHaveProperty('error');
+
+    if (!loggedErrorContext || typeof loggedErrorContext !== 'object' || !('error' in loggedErrorContext)) {
+      throw new Error('Expected logged error context to include an error.');
+    }
+
+    expect(loggedErrorContext.error).toBeInstanceOf(Error);
     const updateCall = monitoredAppsRepository.update.mock.calls[0] as [string, {
       nextCaptureAt?: Date;
     }];

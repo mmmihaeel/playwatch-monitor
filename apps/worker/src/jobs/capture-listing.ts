@@ -14,7 +14,10 @@ const RETRIABLE_CAPTURE_ERROR_PATTERNS = [
   'ERR_TIMED_OUT',
   'ERR_INTERNET_DISCONNECTED'
 ];
-const PLAYWRIGHT_BROWSER_MISSING_PATTERN = 'Executable doesn\'t exist';
+const PLAYWRIGHT_BROWSER_MISSING_PATTERNS = [
+  'Executable doesn\'t exist',
+  'Executable does not exist'
+];
 const GOOGLE_PLAY_TIMEOUT_PATTERN = 'Timeout';
 const FAILURE_RETRY_MINUTES = 5;
 const MAX_FAILURE_REASON_LENGTH = 280;
@@ -32,7 +35,7 @@ function formatFailureReason(error: unknown) {
     return 'Unknown capture error.';
   }
 
-  if (error.message.includes(PLAYWRIGHT_BROWSER_MISSING_PATTERN)) {
+  if (PLAYWRIGHT_BROWSER_MISSING_PATTERNS.some((pattern) => error.message.includes(pattern))) {
     return 'Worker browser runtime is unavailable. Rebuild the worker image with Playwright browsers installed.';
   }
 

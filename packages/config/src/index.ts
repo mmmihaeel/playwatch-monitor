@@ -1,4 +1,13 @@
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { z } from 'zod';
+
+const defaultEnvFilePath = fileURLToPath(new URL('../../../.env', import.meta.url));
+
+if (existsSync(defaultEnvFilePath)) {
+  process.loadEnvFile(defaultEnvFilePath);
+}
 
 const booleanishSchema = z
   .union([z.boolean(), z.enum(['true', 'false', '1', '0'])])
