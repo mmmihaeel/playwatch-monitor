@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @playwatch/api dev --filter @playwatch/web dev --filter @playwatch/worker dev",
+    "dev": "pnpm --parallel --filter @playwatch/api --filter @playwatch/web --filter @playwatch/worker run dev",
     "audit": "pnpm audit --audit-level moderate",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
